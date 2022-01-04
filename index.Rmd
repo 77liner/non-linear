@@ -5,15 +5,16 @@ output:
     code_folding: hide
     toc: true
     toc_float: true
-    theme: readable
+    theme: cerulean
 ---
 
-This work is going to use 'r scam' to achieve non-parametric regression for modeling arterial input function data for PET imaging.
+This work is going to use $scam$ to achieve non-parametric regression for modeling arterial input function data for PET imaging.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(scam)
+library(ggplot2)
 ```
 
 ## Readin data
@@ -24,17 +25,13 @@ data = tibble(
   count = map(filenames,~read.csv(paste0("./data/", .)) %>% select(-X))
 )
 ```
-## Find tmax
+## Find tmax and seperate data
 
-$tmax$ is the time point when AIF reaches a maximum.
+$tmax$ is the time point when AIF reaches a maximum. We only use data after $tmax$ in this study.
 ```{r}
 findtmax <- function (data){
   return(data %>% mutate(tmax = time[which(aif == max(aif))]))
 }
-```
-## Get data after tmax
-
-```{r}
 
 slice_exp <- function(conc){
   conc = conc %>% 
@@ -43,20 +40,12 @@ slice_exp <- function(conc){
            time = time-time[which(aif == max(aif))])
   return(conc)
 }
-```
-
-## Get data before tmax
-```{r}
 
 slice_asc <- function(conc){
   conc = conc %>% 
     filter(time<=time[which(aif == max(aif))])
   return(conc)
 }
-```
-
-## Seperate data
-```{r}
 
 data = data %>% 
   group_by(patient) %>% 
@@ -74,6 +63,7 @@ data = data %>%
 
 ## Non-parametric regression
 
+Use $scam$ package and $scam$ function to fit model. In this regression, we set $delta$ (time in the gamma tube), $vol$ (volum), $disp$ (dispersion correction), decay correction, calibration, metabolite correction, and blood-to-plasma correction as offsets.
 ```{r}
 non_regress = function(data = data, calibration = 0.003, disp = 1 ){
 fit_res = scam(count ~ s(time,k =15, bs="mpd"),
@@ -82,6 +72,14 @@ fit_res = scam(count ~ s(time,k =15, bs="mpd"),
 
 return(fit_res)
 }
+
+fit_data = data %>% 
+  group_by(patient) %>% 
+  mutate(
+    dsc_mod = map(count_dsc,~non_regress(.x)),
+    dsc_pred =map(dsc_mod,~.x$linear.predictors),
+    dsc_res = map(dsc_mod,~.x$residuals)
+    )
 ```
 
 ```{r, include = FALSE}
@@ -90,40 +88,49 @@ return(fit_res)
 #plot(reg,shade=TRUE)
 ```
 
-## Fit model
-
-```{r}
-fit_data = data %>% 
-  group_by(patient) %>% 
-  mutate(
-    dsc_mod = map(count_dsc,~non_regress(.x)),
-    dsc_pred =map(dsc_mod,~exp(.x$linear.predictors)),
-    dsc_res = map(dsc_mod,~.x$residuals)
-    )
-
-```
-
 ## Plots
+
+### some notes for the second plot
+- Grey shade: produces shaded regions as confidence bands for smooths.
+- Black bar at the bottom: They are data points between 0 and 10 and they are to close so that form a bar.
+
+### some notes for the fourth plot
+- The red line is the median of the residuals.
+
 ```{r}
 for (i in 1:nrow(fit_data)){
-   par(mfrow=c(2,2))
-   # plots of line
+   patient = fit_data$patient[i] 
+  # plots of line
   data_line = fit_data$count_dsc[i] %>% as.data.frame()
   plot_line = data_line %>% non_regress()
-  plot(plot_line,shade=TRUE)
+  
+  plot(data_line$time, log(data_line$count), 
+       xlab = "time(min)",
+       ylab = "log(counts)",
+       main = paste0("Raw data for patient:", patient))
+  
+  plot(plot_line,shade=TRUE,
+       xlab = "time(min)",
+       ylab = "log(count/offset)",
+       main = "The Component smooth functions on the scale of the linear predictor")
+  
+ 
+  #ticklabels = c(1,2,3,4,5,6,7,8,9,10,20,60,80)
+  #axis(1, at =ticklabels, lwd = ticklabels)
   
    # plots of prediction
-  plot_data = fit_data$count_dsc[i] %>% as.data.frame()
   plot_pred = fit_data$dsc_pred[i] %>% as.data.frame()
-  patient = fit_data$patient[i]
   names(plot_pred)[1] = "pred"
-  plot(plot_data$time, plot_pred$pred, lty = 1,type="p",pch = 15,col = "grey",
-       cex=0.5, main = paste0("patient:",patient))
+  plot(data_line$time, plot_pred$pred, 
+       xlab = "time(min)",
+       ylab = "log(count)",
+       main = paste0("Predicted data for patient:",patient))
 
   # plots of residuals
   res = fit_data$dsc_res[i]%>% as.data.frame()
   names(res)[1] = "residual"
-  boxplot(res$residual)
+  boxplot(res$residual,
+       main = paste0("Residule for patient:",patient))
   abline(h=median(res$residual),col = "red")
   text(1 - 0.4, median(res$residual), 
        labels = formatC(median(res$residual), format = "f", 
@@ -132,5 +139,4 @@ for (i in 1:nrow(fit_data)){
 }
 
 ```
-
 
