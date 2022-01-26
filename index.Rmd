@@ -104,9 +104,9 @@ for (i in 1:nrow(fit_data)){
   data_line = fit_data$count_dsc[i] %>% as.data.frame()
   plot_line = data_line %>% non_regress()
   
-  plot(data_line$time, log(data_line$count), 
+  plot(data_line$time, log(data_line$aif), 
        xlab = "time(min)",
-       ylab = "log(counts)",
+       ylab = "log(AIF)",
        main = paste0("Raw data for patient:", patient))
   
   plot(plot_line,shade=TRUE,
